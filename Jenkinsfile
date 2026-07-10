@@ -2,63 +2,89 @@ pipeline {
     agent any
 
     tools {
-        // Assume Maven is configured in Jenkins under 'Global Tool Configuration' with this name
-        maven 'Maven 3'
         jdk 'JDK 17'
+        maven 'Maven 3'
     }
 
     environment {
-        DOCKER_IMAGE_NAME = 'environmentsafetyapp'
-        DOCKER_TAG = "v${env.BUILD_NUMBER}"
+        DOCKER_IMAGE = 'YOUR_DOCKERHUB_USERNAME/environmentsafety'
+        DOCKER_TAG = "${BUILD_NUMBER}"
     }
 
     stages {
+
         stage('Checkout') {
             steps {
-                checkout scm
+                git branch: 'main',
+                    credentialsId: 'github-creds',
+                    url: 'https://github.com/PragatiJayaramRathod/EnvironmentSafety.git'
             }
         }
 
-        stage('Build & Test') {
+        stage('Build') {
             steps {
-                echo 'Building and Testing...'
-                // Using maven tool from environment
-                sh 'mvn clean package'
+                sh 'mvn clean package -DskipTests'
+            }
+        }
+
+        stage('Test') {
+            steps {
+                sh 'mvn test'
             }
             post {
                 always {
-                    junit 'target/surefire-reports/*.xml'
+                    junit '**/target/surefire-reports/*.xml'
                 }
             }
         }
 
         stage('Docker Build') {
             steps {
-                echo 'Building Docker Image...'
-                sh "docker build -t ${DOCKER_IMAGE_NAME}:${DOCKER_TAG} -t ${DOCKER_IMAGE_NAME}:latest ."
+                sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                sh "docker tag ${DOCKER_IMAGE}:${DOCKER_TAG} ${DOCKER_IMAGE}:latest"
             }
         }
 
         stage('Docker Push') {
             steps {
-                echo 'Pushing Docker Image (Placeholder)'
-                // Example of pushing to a registry
-                // withCredentials([usernamePassword(credentialsId: 'dockerhub-credentials', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
-                //     sh "echo \$DOCKER_PASSWORD | docker login -u \$DOCKER_USERNAME --password-stdin"
-                //     sh "docker push ${DOCKER_IMAGE_NAME}:${DOCKER_TAG}"
-                //     sh "docker push ${DOCKER_IMAGE_NAME}:latest"
-                // }
-                echo 'Skipping push as registry is not configured.'
+                withCredentials([usernamePassword(
+                    credentialsId: 'dockerhub-creds',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+
+                    sh '''
+                    echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+                    docker push ${DOCKER_IMAGE}:${DOCKER_TAG}
+                    docker push ${DOCKER_IMAGE}:latest
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                sh '''
+                ssh ubuntu@YOUR_APP_SERVER_PRIVATE_IP << EOF
+                docker pull ${DOCKER_IMAGE}:latest
+                docker stop environmentsafety || true
+                docker rm environmentsafety || true
+                docker run -d \
+                  --name environmentsafety \
+                  -p 8080:8080 \
+                  ${DOCKER_IMAGE}:latest
+                EOF
+                '''
             }
         }
     }
 
     post {
         success {
-            echo "Pipeline completed successfully!"
+            echo 'Pipeline completed successfully.'
         }
         failure {
-            echo "Pipeline failed! Please check the logs."
+            echo 'Pipeline failed.'
         }
     }
 }
