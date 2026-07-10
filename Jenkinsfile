@@ -1,11 +1,5 @@
 pipeline {
     agent any
-
-    tools {
-        jdk 'JDK 17'
-        maven 'Maven 3'
-    }
-
     environment {
         DOCKER_IMAGE = 'YOUR_DOCKERHUB_USERNAME/environmentsafety'
         DOCKER_TAG = "${BUILD_NUMBER}"
